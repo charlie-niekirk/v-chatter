@@ -92,6 +92,37 @@ test "browser authorization data is visible only as a user code and never as a d
     try testing.expect(!treeContainsText(tree.root, "refresh_token"));
 }
 
+test "device authentication opens the platform browser service, never a WebView" {
+    const BrowserRecorder = struct {
+        opened: [512]u8 = @splat(0),
+        len: usize = 0,
+
+        fn open(context: ?*anyopaque, url: []const u8) anyerror!void {
+            const self: *@This() = @ptrCast(@alignCast(context.?));
+            try testing.expect(url.len <= self.opened.len);
+            @memcpy(self.opened[0..url.len], url);
+            self.len = url.len;
+        }
+    };
+
+    var recorder: BrowserRecorder = .{};
+    var services: native_sdk.platform.PlatformServices = .{
+        .context = @ptrCast(&recorder),
+        .open_external_url_fn = BrowserRecorder.open,
+    };
+    var effects = native_sdk.Effects(Msg).init(testing.allocator);
+    defer effects.deinit();
+    effects.bindServices(&services);
+
+    var model = main.initialModel();
+    model.auth_state = .authenticating;
+    model.auth_phase = .waiting_for_authorization;
+    try model.verification_uri.set("https://www.twitch.tv/activate?public=true&device-code=ABCD-EFGH");
+
+    main.update(&model, .reopen_browser, &effects);
+    try testing.expectEqualStrings("https://www.twitch.tv/activate?public=true&device-code=ABCD-EFGH", recorder.opened[0..recorder.len]);
+}
+
 test "the view lays out through the canvas engine" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();

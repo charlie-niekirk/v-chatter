@@ -62,7 +62,7 @@
             <alert variant="destructive" text="Chat needs attention"><text wrap="true">{chatError}</text></alert>
           </if>
           <if test="{hasChannels}">
-            <column gap="10" grow="1">
+            <column gap="10">
               <scroll height="44">
                 <row gap="6">
                 <for each="channels" key="index" as="channel">
@@ -72,7 +72,7 @@
                 </row>
               </scroll>
               <text foreground="text_muted">{selectedChannelTitle} · {selectedChannelConnection}</text>
-              <scroll grow="1">
+              <scroll height="220">
                 <column gap="10" padding="12">
                   <for each="messages" as="message">
                     <column gap="2">
@@ -82,13 +82,13 @@
                   </for>
                 </column>
               </scroll>
-              <input-group>
+              <text foreground="text_muted" wrap="true">Live EventSub subscription startup is in progress for open channels.</text>
+              <input-group height="112">
                 <textarea label="Chat message" placeholder="Message" text="{composerInput}" on-input="composer_input_changed" on-submit="send_message" />
                 <input-group-actions><button variant="primary" icon="send" on-press="send_message">Send</button></input-group-actions>
               </input-group>
             </column>
           </if>
-          <if test="{hasChannels}"><text foreground="text_muted" wrap="true">Live EventSub subscription startup is in progress for open channels.</text></if>
           <else><text foreground="text_muted">No channels open. V Chatter never provides anonymous chat.</text></else>
         </column>
       </if>

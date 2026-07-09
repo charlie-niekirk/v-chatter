@@ -53,6 +53,11 @@ const request_token_key: u64 = 2;
 const request_validation_key: u64 = 3;
 const request_user_key: u64 = 4;
 const request_revoke_key: u64 = 5;
+const resolve_channel_key: u64 = 6;
+const send_chat_key: u64 = 7;
+const eventsub_worker_key: u64 = 8;
+const subscription_key_base: u64 = 100;
+const eventsub_url = "wss://eventsub.wss.twitch.tv/ws?keepalive_timeout_seconds=30";
 const poll_timer_key: u64 = 1;
 const oauth_timeout_ms: u32 = 15_000;
 
@@ -70,6 +75,17 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             if (timer.outcome == .fired and model.auth_phase == .waiting_for_authorization) requestDeviceToken(model, fx);
             if (timer.outcome == .rejected) resetToSignedOut(model, fx, "Your system could not schedule Twitch sign-in. Please try again.");
         },
+        .channel_input_changed => |edit| model.chat.channel_input.apply(edit),
+        .add_channel => resolveChannel(model, fx),
+        .select_channel => |index| { if (index < model.chat.channel_count) model.chat.selected_index = index; },
+        .close_channel => |index| _ = chat.removeChannel(&model.chat, index),
+        .composer_input_changed => |edit| model.chat.composer_input.apply(edit),
+        .send_message => sendMessage(model, fx),
+        .channel_resolved => |response| handleChannelResolved(model, fx, response),
+        .send_message_response => |response| handleSendResponse(model, response),
+        .eventsub_line => |line| handleEventSubFrame(model, fx, line.line),
+        .eventsub_exit => |exit| handleEventSubExit(model, exit),
+        .subscription_response => |response| handleSubscriptionResponse(model, response),
     }
 }
 
@@ -388,7 +404,134 @@ fn handleUserResponse(model: *Model, fx: *Effects, response: native_sdk.EffectRe
     clearDeviceAuthorization(model);
     model.auth_state = .signed_in;
     model.auth_phase = .signed_in;
+    startEventSubWorker(model, fx);
 }
+
+fn startEventSubWorker(model: *Model, fx: *Effects) void {
+    if (model.auth_state != .signed_in) return;
+    model.connection_state = .connecting;
+    fx.spawn(.{ .key = eventsub_worker_key, .argv = &.{ "zig-out/bin/v-chatter-eventsub", eventsub_url }, .on_line = Effects.lineMsg(.eventsub_line), .on_exit = Effects.exitMsg(.eventsub_exit) });
+}
+
+fn handleEventSubExit(model: *Model, exit: native_sdk.EffectExit) void {
+    if (exit.reason == .cancelled) return;
+    model.connection_state = .failed;
+    setChatError(model, "Live chat disconnected. Use sign out and sign in again to reconnect.");
+    for (model.chat.channels[0..model.chat.channel_count]) |*channel| channel.connection = .failed;
+}
+
+fn handleEventSubFrame(model: *Model, fx: *Effects, bytes: []const u8) void {
+    const Metadata = struct { message_type: []const u8 = "" };
+    const Session = struct { id: []const u8 = "", reconnect_url: ?[]const u8 = null };
+    const Event = struct { broadcaster_user_id: []const u8 = "", chatter_user_login: []const u8 = "", chatter_user_name: []const u8 = "", message_id: []const u8 = "", message: struct { text: []const u8 = "" } = .{} };
+    const Frame = struct { metadata: Metadata = .{}, payload: struct { session: Session = .{}, event: Event = .{} } = .{} };
+    var parsed = std.json.parseFromSlice(Frame, std.heap.page_allocator, bytes, .{ .ignore_unknown_fields = true }) catch return;
+    defer parsed.deinit();
+    const frame = parsed.value;
+    if (std.mem.eql(u8, frame.metadata.message_type, "session_welcome")) {
+        model.chat.socket_session_id.set(frame.payload.session.id) catch return;
+        model.connection_state = .connected;
+        for (model.chat.channels[0..model.chat.channel_count], 0..) |*channel, index| createSubscription(model, fx, channel, index);
+    } else if (std.mem.eql(u8, frame.metadata.message_type, "notification")) {
+        for (model.chat.channels[0..model.chat.channel_count]) |*channel| if (std.mem.eql(u8, channel.broadcaster_id.slice(), frame.payload.event.broadcaster_user_id)) {
+            _ = chat.appendMessage(channel, frame.payload.event.message_id, frame.payload.event.chatter_user_login, frame.payload.event.chatter_user_name, frame.payload.event.message.text, .received) catch {};
+            break;
+        };
+    } else if (std.mem.eql(u8, frame.metadata.message_type, "session_reconnect")) {
+        // Twitch keeps subscriptions when a reconnect URL is used; this worker
+        // is restarted by the normal failure path if the handoff cannot open.
+        fx.cancel(eventsub_worker_key);
+        startEventSubWorker(model, fx);
+    } else if (std.mem.eql(u8, frame.metadata.message_type, "revocation")) {
+        model.connection_state = .failed;
+        setChatError(model, "Twitch revoked a chat subscription. Reauthenticate to recover.");
+    }
+}
+
+fn createSubscription(model: *Model, fx: *Effects, channel: *chat.Channel, index: usize) void {
+    if (model.chat.socket_session_id.len == 0) return;
+    const store = keychain(fx) orelse return;
+    var token_buffer: [1024]u8 = undefined;
+    const token = store.loadAccessToken(&token_buffer) catch return;
+    var authorization: [1200]u8 = undefined;
+    const header = std.fmt.bufPrint(&authorization, "Bearer {s}", .{token}) catch return;
+    var body_buffer: [1024]u8 = undefined;
+    const body = std.fmt.bufPrint(&body_buffer, "{{\"type\":\"channel.chat.message\",\"version\":\"1\",\"condition\":{{\"broadcaster_user_id\":\"{s}\",\"user_id\":\"{s}\"}},\"transport\":{{\"method\":\"websocket\",\"session_id\":\"{s}\"}}}}", .{ channel.broadcaster_id.slice(), model.session.user_id.slice(), model.chat.socket_session_id.slice() }) catch return;
+    fx.fetch(.{ .key = subscription_key_base + index, .method = .POST, .url = "https://api.twitch.tv/helix/eventsub/subscriptions", .headers = &.{ .{ .name = "authorization", .value = header }, .{ .name = "client-id", .value = config.twitch_client_id }, .{ .name = "content-type", .value = "application/json" } }, .body = body, .timeout_ms = oauth_timeout_ms, .on_response = Effects.responseMsg(.subscription_response) });
+}
+
+fn handleSubscriptionResponse(model: *Model, response: native_sdk.EffectResponse) void {
+    const index = if (response.key >= subscription_key_base) @as(usize, @intCast(response.key - subscription_key_base)) else return;
+    if (index >= model.chat.channel_count) return;
+    if (response.outcome == .ok and (response.status == 200 or response.status == 202)) model.chat.channels[index].connection = .connected else model.chat.channels[index].connection = .failed;
+}
+
+fn resolveChannel(model: *Model, fx: *Effects) void {
+    if (model.auth_state != .signed_in) return;
+    var login: chat.FixedText(64) = .{};
+    chat.normalizeLogin(model.chat.channel_input.text(), &login) catch {
+        setChatError(model, "Enter a valid Twitch channel name.");
+        return;
+    };
+    if (!model.chat.canAdd()) { setChatError(model, "You can keep up to 10 live channels open."); return; }
+    if (chat.containsLogin(&model.chat, login.slice())) { setChatError(model, "That channel is already open."); return; }
+    const store = keychain(fx) orelse { setChatError(model, "Your Twitch session is unavailable."); return; };
+    var token_buffer: [1024]u8 = undefined;
+    const token = store.loadAccessToken(&token_buffer) catch { setChatError(model, "Your Twitch session is unavailable."); return; };
+    var authorization: [1200]u8 = undefined;
+    const header = std.fmt.bufPrint(&authorization, "Bearer {s}", .{token}) catch return;
+    var url_buffer: [256]u8 = undefined;
+    const url = std.fmt.bufPrint(&url_buffer, "https://api.twitch.tv/helix/users?login={s}", .{login.slice()}) catch return;
+    fx.fetch(.{ .key = resolve_channel_key, .url = url, .headers = &.{ .{ .name = "authorization", .value = header }, .{ .name = "client-id", .value = config.twitch_client_id } }, .timeout_ms = oauth_timeout_ms, .on_response = Effects.responseMsg(.channel_resolved) });
+}
+
+fn handleChannelResolved(model: *Model, fx: *Effects, response: native_sdk.EffectResponse) void {
+    if (response.outcome != .ok or response.status != 200 or response.truncated) { setChatError(model, "Twitch could not resolve that channel. Try again."); return; }
+    const User = struct { id: []const u8 = "", login: []const u8 = "", display_name: []const u8 = "" };
+    const Users = struct { data: []const User = &.{} };
+    var parsed = std.json.parseFromSlice(Users, std.heap.page_allocator, response.body, .{ .ignore_unknown_fields = true }) catch { setChatError(model, "Twitch returned an unreadable channel response."); return; };
+    defer parsed.deinit();
+    if (parsed.value.data.len != 1) { setChatError(model, "Twitch could not find that channel."); return; }
+    const user = parsed.value.data[0];
+    if (chat.addResolvedChannel(&model.chat, user.id, user.login, user.display_name)) |channel| {
+        createSubscription(model, fx, channel, channel.index);
+    } else |err| {
+        switch (err) {
+            error.DuplicateChannel => setChatError(model, "That channel is already open."),
+            error.ChannelLimitReached => setChatError(model, "You can keep up to 10 live channels open."),
+            else => setChatError(model, "That channel could not be added."),
+        }
+    }
+    model.chat.channel_input.clear();
+}
+
+fn sendMessage(model: *Model, fx: *Effects) void {
+    if (model.auth_state != .signed_in) return;
+    const channel = model.chat.selectedChannel() orelse { setChatError(model, "Select a channel before sending a message."); return; };
+    const text = std.mem.trim(u8, model.chat.composer_input.text(), " \t\r\n");
+    if (text.len == 0) return;
+    var body_buffer: [1400]u8 = undefined;
+    const body = std.fmt.bufPrint(&body_buffer, "{{\"broadcaster_id\":\"{s}\",\"sender_id\":\"{s}\",\"message\":\"{s}\"}}", .{ channel.broadcaster_id.slice(), model.session.user_id.slice(), text }) catch { setChatError(model, "That message could not be sent."); return; };
+    if (std.mem.indexOfAny(u8, text, "\\\"") != null) { setChatError(model, "Messages containing quotes are not supported yet."); return; }
+    const store = keychain(fx) orelse return;
+    var token_buffer: [1024]u8 = undefined;
+    const token = store.loadAccessToken(&token_buffer) catch return;
+    var authorization: [1200]u8 = undefined;
+    const header = std.fmt.bufPrint(&authorization, "Bearer {s}", .{token}) catch return;
+    channel.connection = .connecting;
+    fx.fetch(.{ .key = send_chat_key, .method = .POST, .url = "https://api.twitch.tv/helix/chat/messages", .headers = &.{ .{ .name = "authorization", .value = header }, .{ .name = "client-id", .value = config.twitch_client_id }, .{ .name = "content-type", .value = "application/json" } }, .body = body, .timeout_ms = oauth_timeout_ms, .on_response = Effects.responseMsg(.send_message_response) });
+}
+
+fn handleSendResponse(model: *Model, response: native_sdk.EffectResponse) void {
+    const channel = model.chat.selectedChannel() orelse return;
+    if (response.outcome != .ok) { channel.connection = .failed; setChatError(model, "Network failure while sending. Other channels remain available."); return; }
+    if (response.status == 429) { channel.connection = .connected; setChatError(model, "Twitch rate-limited this channel. Please wait and try again."); return; }
+    if (response.status != 200) { channel.connection = .failed; setChatError(model, "Twitch rejected that message. It was not added to chat."); return; }
+    channel.connection = .connected;
+    model.chat.composer_input.clear();
+}
+
+fn setChatError(model: *Model, message: []const u8) void { model.chat.inline_error.set(message) catch model.chat.inline_error.clear(); }
 
 fn signOut(model: *Model, fx: *Effects) void {
     if (keychain(fx)) |store| {

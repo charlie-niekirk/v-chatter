@@ -20,4 +20,23 @@ pub fn build(b: *std.Build) void {
     const artifacts = native_sdk.addAppArtifacts(b, b.dependency("native_sdk", .{}), .{ .name = "v-chatter" });
     artifacts.exe.root_module.addImport("v_chatter_build_options", build_options_module);
     artifacts.tests.root_module.addImport("v_chatter_build_options", build_options_module);
+
+    const worker_options = b.addOptions();
+    worker_options.addOption(bool, "websocket_blocking", false);
+    const websocket_module = b.createModule(.{
+        .root_source_file = b.path("vendor/websocket-zig/src/websocket.zig"),
+        .target = b.graph.host,
+        .optimize = .ReleaseFast,
+        .link_libc = true,
+    });
+    websocket_module.addOptions("build", worker_options);
+    const worker_module = b.createModule(.{
+        .root_source_file = b.path("src/eventsub_worker.zig"),
+        .target = b.graph.host,
+        .optimize = .ReleaseFast,
+        .link_libc = true,
+    });
+    worker_module.addImport("websocket", websocket_module);
+    const worker = b.addExecutable(.{ .name = "v-chatter-eventsub", .root_module = worker_module });
+    b.installArtifact(worker);
 }

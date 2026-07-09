@@ -1,4 +1,5 @@
 const ui = @import("ui.zig");
+const chat = @import("chat.zig");
 
 pub fn FixedText(comptime capacity: usize) type {
     return struct {
@@ -91,7 +92,7 @@ pub const ChatMessage = struct {
 
 pub const Model = struct {
     // Device codes and credentials are intentionally not bound into markup.
-    pub const view_unbound = .{ "auth_state", "connection_state", "auth_phase", "device_code", "device_user_code", "verification_uri", "poll_interval_seconds", "auth_error", "session" };
+    pub const view_unbound = .{ "auth_state", "connection_state", "auth_phase", "device_code", "device_user_code", "verification_uri", "poll_interval_seconds", "auth_error", "session", "chat" };
 
     auth_state: AuthState = .signed_out,
     auth_phase: AuthPhase = .signed_out,
@@ -102,6 +103,7 @@ pub const Model = struct {
     verification_uri: FixedText(512) = .{},
     poll_interval_seconds: u32 = 5,
     auth_error: FixedText(192) = .{},
+    chat: chat.State = .{},
 
     pub fn authTitle(model: *const Model) []const u8 {
         return switch (model.auth_phase) {
@@ -123,7 +125,7 @@ pub const Model = struct {
             .waiting_for_authorization => "Approve access in your default browser. This app will continue automatically.",
             .restoring, .refreshing, .validating => "Checking your saved Twitch session before enabling chat.",
             .loading_identity => "Confirming the Twitch account that will send chat messages.",
-            .signed_in => "Your Twitch identity is ready. Channel chat will be available in the next milestone.",
+            .signed_in => "Your Twitch identity is ready. Add channels to start a focused chat workspace.",
         };
     }
 
@@ -159,6 +161,15 @@ pub const Model = struct {
         return model.session.display_name.slice();
     }
 
+    pub fn channelInput(model: *const Model) []const u8 { return model.chat.channel_input.text(); }
+    pub fn composerInput(model: *const Model) []const u8 { return model.chat.composer_input.text(); }
+    pub fn hasChannels(model: *const Model) bool { return model.chat.hasChannels(); }
+    pub fn hasChatError(model: *const Model) bool { return model.chat.hasError(); }
+    pub fn chatError(model: *const Model) []const u8 { return model.chat.errorText(); }
+    pub fn selectedChannelTitle(model: *const Model) []const u8 { return model.chat.selectedTitle(); }
+    pub fn selectedChannelConnection(model: *const Model) []const u8 { return model.chat.selectedConnection(); }
+    pub fn channels(model: *const Model) []const chat.Channel { return model.chat.activeChannels(); }
+
     pub fn connectionLabel(model: *const Model) []const u8 {
         return switch (model.connection_state) {
             .offline => "Offline",
@@ -171,7 +182,7 @@ pub const Model = struct {
 };
 
 pub const Msg = union(enum) {
-    pub const view_unbound = .{ "device_code_response", "token_response", "validation_response", "user_response", "poll_timer" };
+    pub const view_unbound = .{ "device_code_response", "token_response", "validation_response", "user_response", "poll_timer", "channel_resolved", "send_message_response", "eventsub_line", "eventsub_exit", "subscription_response" };
 
     begin_auth,
     reopen_browser,
@@ -182,4 +193,15 @@ pub const Msg = union(enum) {
     validation_response: @import("native_sdk").EffectResponse,
     user_response: @import("native_sdk").EffectResponse,
     poll_timer: @import("native_sdk").EffectTimer,
+    channel_input_changed: @import("native_sdk").canvas.TextInputEvent,
+    add_channel,
+    select_channel: usize,
+    close_channel: usize,
+    composer_input_changed: @import("native_sdk").canvas.TextInputEvent,
+    send_message,
+    channel_resolved: @import("native_sdk").EffectResponse,
+    send_message_response: @import("native_sdk").EffectResponse,
+    eventsub_line: @import("native_sdk").EffectLine,
+    eventsub_exit: @import("native_sdk").EffectExit,
+    subscription_response: @import("native_sdk").EffectResponse,
 };

@@ -49,9 +49,35 @@
         </column>
       </if>
       <if test="{isSignedIn}">
-        <column gap="12">
-          <text>Signed in as {displayName}.</text>
-          <button variant="outline" on-press="sign_out">Sign out</button>
+        <column gap="16">
+          <row gap="10" cross="center">
+            <text grow="1">Signed in as {displayName}.</text>
+            <button size="sm" variant="outline" on-press="sign_out">Sign out</button>
+          </row>
+          <row gap="8">
+            <text-field grow="1" label="Twitch channel" placeholder="Channel name" text="{channelInput}" on-input="channel_input_changed" on-submit="add_channel" />
+            <button variant="primary" icon="plus" on-press="add_channel">Add channel</button>
+          </row>
+          <if test="{hasChatError}">
+            <alert variant="destructive" text="Chat needs attention"><text wrap="true">{chatError}</text></alert>
+          </if>
+          <if test="{hasChannels}">
+            <column gap="10">
+              <row gap="6">
+                <for each="channels" key="index" as="channel">
+                  <button size="sm" variant="secondary" on-press="select_channel:{channel.index}">{channel.label}</button>
+                  <button size="sm" variant="ghost" icon="x" label="Close channel" on-press="close_channel:{channel.index}"></button>
+                </for>
+              </row>
+              <text foreground="text_muted">{selectedChannelTitle} · {selectedChannelConnection}</text>
+              <input-group grow="1">
+                <textarea label="Chat message" placeholder="Message" text="{composerInput}" on-input="composer_input_changed" on-submit="send_message" />
+                <input-group-actions><button variant="primary" icon="send" on-press="send_message">Send</button></input-group-actions>
+              </input-group>
+            </column>
+          </if>
+          <if test="{hasChannels}"><text foreground="text_muted" wrap="true">Live EventSub subscription startup is in progress for open channels.</text></if>
+          <else><text foreground="text_muted">No channels open. V Chatter never provides anonymous chat.</text></else>
         </column>
       </if>
     </column>

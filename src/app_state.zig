@@ -169,6 +169,7 @@ pub const Model = struct {
     pub fn selectedChannelTitle(model: *const Model) []const u8 { return model.chat.selectedTitle(); }
     pub fn selectedChannelConnection(model: *const Model) []const u8 { return model.chat.selectedConnection(); }
     pub fn channels(model: *const Model) []const chat.Channel { return model.chat.activeChannels(); }
+    pub fn messages(model: *const Model) []const chat.Message { return model.chat.selectedMessages(); }
 
     pub fn connectionLabel(model: *const Model) []const u8 {
         return switch (model.connection_state) {

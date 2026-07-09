@@ -10,8 +10,8 @@
     <badge>macOS</badge>
   </row>
 
-  <card grow="1" padding="32">
-    <column gap="18" main="center">
+  <card grow="1" padding="24">
+    <column gap="18">
       <row>
         <if test="{isSignedIn}">
           <badge>Signed in</badge>
@@ -49,7 +49,7 @@
         </column>
       </if>
       <if test="{isSignedIn}">
-        <column gap="16">
+        <column gap="16" grow="1">
           <row gap="10" cross="center">
             <text grow="1">Signed in as {displayName}.</text>
             <button size="sm" variant="outline" on-press="sign_out">Sign out</button>
@@ -62,15 +62,27 @@
             <alert variant="destructive" text="Chat needs attention"><text wrap="true">{chatError}</text></alert>
           </if>
           <if test="{hasChannels}">
-            <column gap="10">
-              <row gap="6">
+            <column gap="10" grow="1">
+              <scroll height="44">
+                <row gap="6">
                 <for each="channels" key="index" as="channel">
                   <button size="sm" variant="secondary" on-press="select_channel:{channel.index}">{channel.label}</button>
                   <button size="sm" variant="ghost" icon="x" label="Close channel" on-press="close_channel:{channel.index}"></button>
                 </for>
-              </row>
+                </row>
+              </scroll>
               <text foreground="text_muted">{selectedChannelTitle} · {selectedChannelConnection}</text>
-              <input-group grow="1">
+              <scroll grow="1">
+                <column gap="10" padding="12">
+                  <for each="messages" as="message">
+                    <column gap="2">
+                      <text>{message.sender}</text>
+                      <text foreground="text_muted" wrap="true">{message.body}</text>
+                    </column>
+                  </for>
+                </column>
+              </scroll>
+              <input-group>
                 <textarea label="Chat message" placeholder="Message" text="{composerInput}" on-input="composer_input_changed" on-submit="send_message" />
                 <input-group-actions><button variant="primary" icon="send" on-press="send_message">Send</button></input-group-actions>
               </input-group>

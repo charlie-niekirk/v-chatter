@@ -29,6 +29,9 @@ pub const Message = struct {
     sender_name: FixedText(128) = .{},
     text: FixedText(500) = .{},
     delivery: DeliveryState = .received,
+
+    pub fn body(message: *const Message) []const u8 { return message.text.slice(); }
+    pub fn sender(message: *const Message) []const u8 { return message.sender_name.slice(); }
 };
 
 pub const Channel = struct {
@@ -68,6 +71,7 @@ pub const State = struct {
     pub fn selectedChannelConst(state: *const State) ?*const Channel { if (state.selected_index) |index| if (index < state.channel_count) return &state.channels[index]; return null; }
     pub fn selectedTitle(state: *const State) []const u8 { return if (state.selectedChannelConst()) |channel| channel.display_name.slice() else "Select a channel"; }
     pub fn selectedConnection(state: *const State) []const u8 { return if (state.selectedChannelConst()) |channel| channel.connectionLabel() else "Offline"; }
+    pub fn selectedMessages(state: *const State) []const Message { return if (state.selectedChannelConst()) |channel| channel.messages[0..channel.message_count] else &.{}; }
 };
 
 pub fn normalizeLogin(input: []const u8, out: *FixedText(64)) !void {

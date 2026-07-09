@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.16.0
+      - run: npx --yes @native-sdk/cli@0.4.1 check . --strict
+
+  test:
+    name: test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.16.0
+      - run: npx --yes @native-sdk/cli@0.4.1 test . --yes
+
+  build:
+    name: build
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.16.0
+      - run: npx --yes @native-sdk/cli@0.4.1 build . --yes

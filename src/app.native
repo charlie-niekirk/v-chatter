@@ -1,15 +1,30 @@
-<!-- The whole view. Embedded into the binary and hot-reloaded in dev:
-     edit this file while the app runs and the window updates without
-     losing the count. Validate with: native markup check src/app.native -->
-<column gap="12" padding="16">
-  <row gap="8" cross="center">
-    <text grow="1">Counter</text>
-    <button size="sm" variant="ghost" on-press="reset">Reset</button>
+<!-- The deterministic foundation state. OAuth is deliberately not embedded:
+     the authentication milestone opens Twitch in the system browser. -->
+<column gap="24" padding="28" background="background">
+  <row gap="12" cross="center">
+    <icon name="circle-dot" label="V Chatter" />
+    <column gap="2">
+      <text size="heading">V Chatter</text>
+      <text foreground="text_muted">A focused Twitch chat client for macOS</text>
+    </column>
+    <spacer grow="1" />
+    <badge>macOS</badge>
   </row>
-  <row gap="8" main="center" cross="center" grow="1">
-    <button variant="secondary" on-press="decrement">-</button>
-    <text>{count}</text>
-    <button variant="primary" on-press="increment">+</button>
-  </row>
-  <status-bar>count: {count}</status-bar>
+
+  <card grow="1" padding="32">
+    <column gap="18" main="center">
+      <row>
+        <badge>Account required</badge>
+      </row>
+      <text size="heading">{authTitle}</text>
+      <text foreground="text_muted" wrap="true">{authDescription}</text>
+      <separator />
+      <row gap="10" cross="center">
+        <icon name="info" label="Authentication information" />
+        <text foreground="text_muted" wrap="true">Twitch authentication will open in your default browser. V Chatter does not provide anonymous chat.</text>
+      </row>
+    </column>
+  </card>
+
+  <status-bar>{connectionLabel} · Authentication opens in your default browser.</status-bar>
 </column>

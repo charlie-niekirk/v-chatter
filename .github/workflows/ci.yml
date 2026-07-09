@@ -19,10 +19,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - run: npm ci --ignore-scripts
       - uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.16.0
-      - run: npx --yes @native-sdk/cli@0.4.1 check . --strict
+      - run: npx --no-install native check . --strict
 
   test:
     name: test
@@ -32,10 +33,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - run: npm ci --ignore-scripts
       - uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.16.0
-      - run: npx --yes @native-sdk/cli@0.4.1 test . --yes
+      - run: npx --no-install native test . --yes
 
   build:
     name: build
@@ -45,7 +47,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - run: npm ci --ignore-scripts
       - uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.16.0
-      - run: npx --yes @native-sdk/cli@0.4.1 build . --yes
+      - run: npx --no-install native build . --yes

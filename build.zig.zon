@@ -1,0 +1,8 @@
+.{
+    .name = .v_chatter,
+    .fingerprint = 0x239b29c5a707070,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{ .native_sdk = .{ .path = "node_modules/@native-sdk/cli" } },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "assets", "app.zon", "package.json", "package-lock.json" },
+}

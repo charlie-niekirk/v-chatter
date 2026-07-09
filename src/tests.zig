@@ -1,6 +1,11 @@
 const std = @import("std");
 const native_sdk = @import("native_sdk");
 const main = @import("main.zig");
+const app_state = @import("app_state.zig");
+const chat = @import("chat.zig");
+const config = @import("config.zig");
+const storage = @import("storage.zig");
+const twitch = @import("twitch.zig");
 
 const canvas = native_sdk.canvas;
 const testing = std.testing;
@@ -44,59 +49,64 @@ fn expectByText(widget: canvas.Widget, kind: canvas.WidgetKind, text: []const u8
     };
 }
 
-test "clicking the buttons drives the model through typed dispatch" {
+test "the signed-out shell is deterministic and excludes anonymous chat" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    var model = main.initialModel();
+    const model = main.initialModel();
 
-    var tree = try buildTree(arena, &model);
-    _ = try expectByText(tree.root, .text, "0");
-    _ = try expectByText(tree.root, .status_bar, "count: 0");
-
-    // Click "+": the count increments and the view rebuilds with the
-    // new value, keeping widget ids stable.
-    const plus = try expectByText(tree.root, .button, "+");
-    main.update(&model, tree.msgForPointer(plus.id, .up).?);
-    try testing.expectEqual(@as(i64, 1), model.count);
-
-    tree = try buildTree(arena, &model);
-    _ = try expectByText(tree.root, .text, "1");
-    _ = try expectByText(tree.root, .status_bar, "count: 1");
-    try testing.expectEqual(plus.id, (try expectByText(tree.root, .button, "+")).id);
-
-    // Click "-" twice: the count goes negative.
-    const minus = try expectByText(tree.root, .button, "-");
-    main.update(&model, tree.msgForPointer(minus.id, .up).?);
-    main.update(&model, tree.msgForPointer(minus.id, .up).?);
-    try testing.expectEqual(@as(i64, -1), model.count);
-
-    // Click "Reset": back to zero.
-    tree = try buildTree(arena, &model);
-    const reset = try expectByText(tree.root, .button, "Reset");
-    main.update(&model, tree.msgForPointer(reset.id, .up).?);
-    try testing.expectEqual(@as(i64, 0), model.count);
-
-    tree = try buildTree(arena, &model);
-    _ = try expectByText(tree.root, .status_bar, "count: 0");
+    const tree = try buildTree(arena, &model);
+    _ = try expectByText(tree.root, .text, "Sign in to Twitch");
+    _ = try expectByText(tree.root, .text, "Twitch authentication will open in your default browser. V Chatter does not provide anonymous chat.");
+    _ = try expectByText(tree.root, .status_bar, "Offline · Authentication opens in your default browser.");
+    try testing.expectEqual(app_state.AuthState.signed_out, model.auth_state);
 }
 
 test "the view lays out through the canvas engine" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
 
-    var model = main.initialModel();
+    const model = main.initialModel();
     const tree = try buildTree(arena_state.allocator(), &model);
 
     var nodes: [64]canvas.WidgetLayoutNode = undefined;
-    const layout = try canvas.layoutWidgetTree(tree.root, native_sdk.geometry.RectF.init(0, 0, 480, 320), &nodes);
+    const layout = try canvas.layoutWidgetTree(tree.root, native_sdk.geometry.RectF.init(0, 0, 960, 640), &nodes);
     try testing.expect(layout.nodes.len > 0);
 
-    const plus = try expectByText(tree.root, .button, "+");
-    var saw_button = false;
+    const title = try expectByText(tree.root, .text, "V Chatter");
+    var saw_title = false;
     for (layout.nodes) |node| {
-        if (node.widget.id == plus.id) saw_button = true;
+        if (node.widget.id == title.id) saw_title = true;
     }
-    try testing.expect(saw_button);
+    try testing.expect(saw_title);
+}
+
+test "preferences migrate version zero and never serialize credentials" {
+    var loaded = try storage.decodePreferences(testing.allocator, "{\"theme\":\"dark\",\"saved_channels\":[]}");
+    defer loaded.deinit();
+
+    const migrated = loaded.preferences();
+    try testing.expectEqual(storage.current_preferences_version, migrated.version);
+    try testing.expectEqual(storage.Theme.dark, migrated.theme);
+
+    const channels = [_]app_state.SavedChannel{.{ .broadcaster_id = "1", .login = "twitch", .display_name = "Twitch" }};
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    try storage.encodePreferences(.{ .saved_channels = &channels }, &output.writer);
+
+    const encoded = output.written();
+    try testing.expect(std.mem.indexOf(u8, encoded, "access_token") == null);
+    try testing.expect(std.mem.indexOf(u8, encoded, "refresh_token") == null);
+    try testing.expect(std.mem.indexOf(u8, encoded, "Twitch") != null);
+}
+
+test "foundation boundaries expose an unconfigured Twitch client and channel cap" {
+    try testing.expect(!config.hasTwitchClientId());
+    const client: twitch.Client = .{};
+    try testing.expect(!client.isConfigured());
+    try testing.expect(chat.canActivate(&.{}));
+
+    const full = [_]app_state.ActiveChannel{.{}} ** chat.max_active_channels;
+    try testing.expect(!chat.canActivate(&full));
 }

@@ -91,16 +91,20 @@ pub const KeychainStore = struct {
     pub fn save(self: KeychainStore, credentials: state.AuthCredentials) !void {
         if (credentials.access_token.len == 0 or credentials.refresh_token.len == 0) return error.InvalidCredentials;
 
-        try self.services.setCredential(.{
-            .service = self.service,
-            .account = access_token_account,
-            .secret = credentials.access_token,
-        });
-        errdefer self.services.deleteCredential(.{ .service = self.service, .account = access_token_account }) catch {};
+        // Twitch refresh tokens are one-time-use. Store the replacement
+        // refresh token first so interruption cannot leave a spent token as
+        // the only recoverable credential; any failed replacement clears the
+        // pair and deliberately returns the app to browser sign-in.
         try self.services.setCredential(.{
             .service = self.service,
             .account = refresh_token_account,
             .secret = credentials.refresh_token,
+        });
+        errdefer self.clear();
+        try self.services.setCredential(.{
+            .service = self.service,
+            .account = access_token_account,
+            .secret = credentials.access_token,
         });
     }
 

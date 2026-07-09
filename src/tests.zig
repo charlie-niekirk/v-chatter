@@ -6,6 +6,7 @@ const chat = @import("chat.zig");
 const config = @import("config.zig");
 const storage = @import("storage.zig");
 const twitch = @import("twitch.zig");
+const auth = @import("auth.zig");
 
 const canvas = native_sdk.canvas;
 const testing = std.testing;
@@ -49,6 +50,14 @@ fn expectByText(widget: canvas.Widget, kind: canvas.WidgetKind, text: []const u8
     };
 }
 
+fn treeContainsText(widget: canvas.Widget, needle: []const u8) bool {
+    if (std.mem.indexOf(u8, widget.text, needle) != null) return true;
+    for (widget.children) |child| {
+        if (treeContainsText(child, needle)) return true;
+    }
+    return false;
+}
+
 test "the signed-out shell is deterministic and excludes anonymous chat" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
@@ -58,9 +67,60 @@ test "the signed-out shell is deterministic and excludes anonymous chat" {
 
     const tree = try buildTree(arena, &model);
     _ = try expectByText(tree.root, .text, "Sign in to Twitch");
+    _ = try expectByText(tree.root, .button, "Sign in with Twitch");
     _ = try expectByText(tree.root, .text, "Twitch authentication will open in your default browser. V Chatter does not provide anonymous chat.");
     _ = try expectByText(tree.root, .status_bar, "Offline · Authentication opens in your default browser.");
     try testing.expectEqual(app_state.AuthState.signed_out, model.auth_state);
+}
+
+test "browser authorization data is visible only as a user code and never as a device secret" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var model = main.initialModel();
+    model.auth_state = .authenticating;
+    model.auth_phase = .waiting_for_authorization;
+    try model.device_code.set("server-only-device-code-which-must-not-render");
+    try model.device_user_code.set("ABCD-EFGH");
+    try model.verification_uri.set("https://www.twitch.tv/activate?public=true");
+
+    const tree = try buildTree(arena, &model);
+    _ = try expectByText(tree.root, .text, "ABCD-EFGH");
+    try testing.expect(!treeContainsText(tree.root, "server-only-device-code-which-must-not-render"));
+    try testing.expect(!treeContainsText(tree.root, "access_token"));
+    try testing.expect(!treeContainsText(tree.root, "refresh_token"));
+}
+
+test "device authentication opens the platform browser service, never a WebView" {
+    const BrowserRecorder = struct {
+        opened: [512]u8 = @splat(0),
+        len: usize = 0,
+
+        fn open(context: ?*anyopaque, url: []const u8) anyerror!void {
+            const self: *@This() = @ptrCast(@alignCast(context.?));
+            try testing.expect(url.len <= self.opened.len);
+            @memcpy(self.opened[0..url.len], url);
+            self.len = url.len;
+        }
+    };
+
+    var recorder: BrowserRecorder = .{};
+    var services: native_sdk.platform.PlatformServices = .{
+        .context = @ptrCast(&recorder),
+        .open_external_url_fn = BrowserRecorder.open,
+    };
+    var effects = native_sdk.Effects(Msg).init(testing.allocator);
+    defer effects.deinit();
+    effects.bindServices(&services);
+
+    var model = main.initialModel();
+    model.auth_state = .authenticating;
+    model.auth_phase = .waiting_for_authorization;
+    try model.verification_uri.set("https://www.twitch.tv/activate?public=true&device-code=ABCD-EFGH");
+
+    main.update(&model, .reopen_browser, &effects);
+    try testing.expectEqualStrings("https://www.twitch.tv/activate?public=true&device-code=ABCD-EFGH", recorder.opened[0..recorder.len]);
 }
 
 test "the view lays out through the canvas engine" {
@@ -102,6 +162,7 @@ test "preferences migrate version zero and never serialize credentials" {
 }
 
 test "foundation boundaries expose an unconfigured Twitch client and channel cap" {
+    _ = auth;
     try testing.expect(!config.hasTwitchClientId());
     const client: twitch.Client = .{};
     try testing.expect(!client.isConfigured());

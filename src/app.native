@@ -1,5 +1,4 @@
-<!-- The deterministic foundation state. OAuth is deliberately not embedded:
-     the authentication milestone opens Twitch in the system browser. -->
+<!-- OAuth is deliberately not embedded: V Chatter uses the system browser. -->
 <column gap="24" padding="28" background="background">
   <row gap="12" cross="center">
     <icon name="circle-dot" label="V Chatter" />
@@ -14,15 +13,47 @@
   <card grow="1" padding="32">
     <column gap="18" main="center">
       <row>
-        <badge>Account required</badge>
+        <if test="{isSignedIn}">
+          <badge>Signed in</badge>
+        </if>
+        <else>
+          <badge>Account required</badge>
+        </else>
       </row>
       <text size="heading">{authTitle}</text>
       <text foreground="text_muted" wrap="true">{authDescription}</text>
+      <if test="{hasAuthError}">
+        <alert variant="destructive" text="Twitch sign-in needs attention">
+          <text wrap="true">{authError}</text>
+        </alert>
+      </if>
       <separator />
-      <row gap="10" cross="center">
-        <icon name="info" label="Authentication information" />
-        <text foreground="text_muted" wrap="true">Twitch authentication will open in your default browser. V Chatter does not provide anonymous chat.</text>
-      </row>
+      <if test="{isSignedOut}">
+        <column gap="12">
+          <button variant="primary" icon="external-link" on-press="begin_auth">Sign in with Twitch</button>
+          <row gap="10" cross="center">
+            <icon name="info" label="Authentication information" />
+            <text foreground="text_muted" wrap="true">Twitch authentication will open in your default browser. V Chatter does not provide anonymous chat.</text>
+          </row>
+        </column>
+      </if>
+      <if test="{isWaitingForAuthorization}">
+        <column gap="12">
+          <text>Enter this code in your browser:</text>
+          <text size="heading">{userCode}</text>
+          <text foreground="text_muted" wrap="true">{verificationUri}</text>
+          <row gap="10">
+            <button variant="primary" icon="external-link" on-press="reopen_browser">Open Twitch in browser</button>
+            <button variant="ghost" on-press="cancel_auth">Cancel</button>
+          </row>
+        </column>
+      </if>
+      <if test="{isSignedIn}">
+        <column gap="12">
+          <text>Signed in as {displayName}.</text>
+          <button variant="outline" on-press="sign_out">Sign out</button>
+        </column>
+      </if>
     </column>
   </card>
 
